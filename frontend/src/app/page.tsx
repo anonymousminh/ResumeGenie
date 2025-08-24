@@ -36,29 +36,45 @@ export default function Home() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("resumeFile", resumeFile);
-    formData.append("jobPostingText", jobPostingText);
+    // Read resume file as ArrayBuffer, then convert to Base64
+    const reader = new FileReader();
+    reader.readAsArrayBuffer(resumeFile);
 
-    try {
-      const response = await fetch("/api/process-resume", {
-        method: "POST",
-        body: formData
-      });
+    reader.onload = async (e) => {
+      if (e.target && e.target.result) {
+        const arrayBuffer = e.target.result as ArrayBuffer;
+        const base64String = Buffer.from(arrayBuffer).toString("base64");
 
-      if (response.ok) {
-        const data = await response.json();
-        alert(`Success: ${data.message}`);
-        console.log(data);
-      } else {
-        const errorData = await response.json();
-        alert(`Error: ${errorData.error}`);
-        console.log(errorData);
-      } 
-    } catch (error) {
-      console.error("Failed to send data:", error);
-      alert("An error occurred while sending data.");
-    }
+        try {
+          const response = await fetch("http://localhost:5000/upload_resume", { // Point to your Flask backend S3 upload endpoint
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              resumeFileBase64: base64String,
+              resumeFileName: resumeFile.name,
+              jobPostingText: jobPostingText,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            alert(`Success: ${data.message}\nS3 URL: ${data.s3Url}`);
+            console.log("S3 URL:", data.s3Url);
+            console.log("Job Posting Text:", data.jobPostingText.substring(0, 500) + "...");
+            // You can now use the S3 URL or jobPostingText for further processing
+          } else {
+            const errorData = await response.json();
+            alert(`Error: ${errorData.error}`);
+            console.error(errorData);
+          }
+        } catch (error) {
+          console.error("Failed to send data to backend:", error);
+          alert("An error occurred while sending data to backend.");
+        }
+      }
+    };
   };
 
 
