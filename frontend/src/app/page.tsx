@@ -46,7 +46,7 @@ export default function Home() {
         const base64String = Buffer.from(arrayBuffer).toString("base64");
 
         try {
-          const response = await fetch("http://localhost:3000/upload_resume", { // Point to your Flask backend S3 upload endpoint
+          const uploadResponse = await fetch("http://localhost:3000/upload_resume", { // Point to your Flask backend S3 upload endpoint
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -58,15 +58,41 @@ export default function Home() {
             }),
           });
 
-          if (response.ok) {
-            const data = await response.json();
-            alert(`Success: ${data.message}\nS3 URL: ${data.s3Url}`);
-            console.log("S3 URL:", data.s3Url);
-            console.log("Job Posting Text:", data.jobPostingText.substring(0, 500) + "...");
-            // You can now use the S3 URL or jobPostingText for further processing
+          if (!uploadResponse.ok) {
+            const errorData = await uploadResponse.json();
+            alert(`Error uploading to S3: ${errorData.error}`);
+            console.error(errorData);
+            return;
+          }
+
+          const uploadData = await uploadResponse.json();
+          const s3Url = uploadData.s3Url;
+          console.log("File uploaded to S3:", s3Url);
+
+          // Step 2: Call parsing endpoint with S3 URL and job posting text
+          const parseResponse = await fetch("http://localhost:3000/parse_s3_documents", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              s3Url: s3Url,
+              resumeFileType: resumeFile.type, // Pass file type for parsing
+              jobPostingText: jobPostingText,
+            }),
+          });
+
+          if (parseResponse.ok) {
+            const parsedData = await parseResponse.json();
+            alert(`Success: Data parsed!`);
+            console.log("Parsed Resume:", parsedData.parsedResumeText.substring(0, 500) + "...");
+            console.log("Parsed Job Posting:", parsedData.parsedJobPostingText.substring(0, 500) + "...");
+            // You can now set these parsed texts to state variables to display them
+            setResumeContent(parsedData.parsedResumeText);
+            setJobPostingContent(parsedData.parsedJobPostingText);
           } else {
-            const errorData = await response.json();
-            alert(`Error: ${errorData.error}`);
+            const errorData = await parseResponse.json();
+            alert(`Error parsing documents: ${errorData.error}`);
             console.error(errorData);
           }
         } catch (error) {
