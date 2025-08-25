@@ -46,7 +46,7 @@ export default function Home() {
         const base64String = Buffer.from(arrayBuffer).toString("base64");
 
         try {
-          const response = await fetch("http://localhost:5000/upload_resume", { // Point to your Flask backend S3 upload endpoint
+          const response = await fetch("http://localhost:3000/upload_resume", { // Point to your Flask backend S3 upload endpoint
             method: "POST",
             headers: {
               "Content-Type": "application/json",
