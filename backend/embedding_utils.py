@@ -1,4 +1,6 @@
-# backend/embedding_utils.py
+import os
+from dotenv import load_dotenv
+from langchain_openai import OpenAIEmbeddings
 
 import os
 from dotenv import load_dotenv
