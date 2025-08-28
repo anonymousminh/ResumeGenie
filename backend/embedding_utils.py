@@ -1,34 +1,53 @@
 # backend/embedding_utils.py
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import os
+from dotenv import load_dotenv
+from langchain_openai import OpenAIEmbeddings
 
-# from langchain_openai import OpenAIEmbeddings # Uncomment if using OpenAI
+# Load environment variables from .env file
+load_dotenv()
 
-# Initialize embedding model
-# For local models, use HuggingFaceEmbeddings
-model_name = "sentence-transformers/all-MiniLM-L6-v2"
-embeddings_model = HuggingFaceEmbeddings(model_name=model_name)
-
-# For OpenAI embeddings (requires OPENAI_API_KEY environment variable)
-# embeddings_model = OpenAIEmbeddings()
-
-# Placeholder for the chosen embedding model
-# You will uncomment and configure one of the above based on your choice
-# embeddings_model = None # Replace with actual initialization
+# Initialize OpenAI embedding model
+# This will use the text-embedding-ada-002 model by default
+# Ensure OPENAI_API_KEY is set in your environment variables or .env file
+embeddings_model = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 
 def get_text_embedding(text: str) -> list[float]:
-    """Generates an embedding for the given text."""
-    if embeddings_model is None:
-        raise ValueError(
-            "Embedding model not initialized. Choose HuggingFaceEmbeddings or OpenAIEmbeddings."
-        )
-    return embeddings_model.embed_query(text)
+    """
+    Generates an embedding for the given text using OpenAI's embedding model.
+
+    Args:
+        text (str): The text to generate an embedding for
+
+    Returns:
+        list[float]: A list of floating-point numbers representing the text embedding
+    """
+    if not text or not text.strip():
+        raise ValueError("Text cannot be empty")
+
+    try:
+        embedding = embeddings_model.embed_query(text)
+        return embedding
+    except Exception as e:
+        raise RuntimeError(f"Failed to generate embedding: {str(e)}")
 
 
-# Example of how to initialize (choose one):
-# embeddings_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-# Or if you have OpenAI API key:
-# import os
-# os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
-# embeddings_model = OpenAIEmbeddings()
+def get_multiple_text_embeddings(texts: list[str]) -> list[list[float]]:
+    """
+    Generates embeddings for multiple texts using OpenAI's embedding model.
+
+    Args:
+        texts (list[str]): A list of texts to generate embeddings for
+
+    Returns:
+        list[list[float]]: A list of embeddings, each as a list of floating-point numbers
+    """
+    if not texts:
+        raise ValueError("Texts list cannot be empty")
+
+    try:
+        embeddings = embeddings_model.embed_documents(texts)
+        return embeddings
+    except Exception as e:
+        raise RuntimeError(f"Failed to generate embeddings: {str(e)}")
