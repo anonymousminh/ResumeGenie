@@ -31,7 +31,7 @@ export default function Home() {
   }
 
   const handleSubmit = async () => {
-    if (!resumeFile || jobPostingText) {
+    if (!resumeFile || !jobPostingText) {
       alert("Please upload a resume and paste the job posting.");
       return;
     }
@@ -46,7 +46,7 @@ export default function Home() {
         const base64String = Buffer.from(arrayBuffer).toString("base64");
 
         try {
-          const uploadResponse = await fetch("http://localhost:3000/upload_resume", { // Point to your Flask backend S3 upload endpoint
+          const uploadResponse = await fetch("http://localhost:5000/upload_resume", { // Point to your Flask backend S3 upload endpoint
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -54,6 +54,7 @@ export default function Home() {
             body: JSON.stringify({
               resumeFileBase64: base64String,
               resumeFileName: resumeFile.name,
+              resumeFileType: resumeFile.type,
               jobPostingText: jobPostingText,
             }),
           });
@@ -70,7 +71,7 @@ export default function Home() {
           console.log("File uploaded to S3:", s3Url);
 
           // Step 2: Call parsing endpoint with S3 URL and job posting text
-          const parseResponse = await fetch("http://localhost:3000/parse_s3_documents", {
+          const processResponse = await fetch("http://localhost:5000/process_documents", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -82,16 +83,40 @@ export default function Home() {
             }),
           });
 
-          if (parseResponse.ok) {
-            const parsedData = await parseResponse.json();
-            alert(`Success: Data parsed!`);
-            console.log("Parsed Resume:", parsedData.parsedResumeText.substring(0, 500) + "...");
-            console.log("Parsed Job Posting:", parsedData.parsedJobPostingText.substring(0, 500) + "...");
-            // You can now set these parsed texts to state variables to display them
-            setResumeContent(parsedData.parsedResumeText);
-            setJobPostingContent(parsedData.parsedJobPostingText);
+          if (processResponse.ok) {
+            const processedData = await processResponse.json();
+            alert(`Success: Data processed, embeddings generated, and saved to TiDB!`);
+            console.log("Parsed Resume:", processedData.parsedResumeText.substring(0, 500) + "...");
+            console.log("Parsed Job Posting:", processedData.parsedJobPostingText.substring(0, 500) + "...");
+            
+            console.log("Resume Embedding (first 5 dims):", processedData.resumeEmbedding.slice(0, 5), "...");
+            console.log("Job Posting Embedding (first 5 dims):",processedData.jobPostingEmbedding.slice(0, 5), "...");
+            setResumeContent(processedData.parsedResumeText);
+            setJobPostingContent(processedData.parsedJobPostingText);
+
+            const jobPostingEmbed = processedData.jobPostingEmbedding;
+            const searchResultResponse = await fetch("http://localhost:5000/vector_search", {
+              method: "POST",
+              headers: {
+                "Content-Type": "applications/json",
+              },
+              body: JSON.stringify({
+                queryEmbedding: jobPostingEmbed,
+                searchType: "resumes",
+                limit: 3
+              }),
+            });
+
+            if (searchResultResponse.ok) {
+              const searchResults = await searchResultResponse.json();
+              console.log("Top 3 Similar Resumes:", searchResults.results);
+            } else {
+              console.error("Error during vector search: ", await searchResultResponse.json());
+            }
+
+
           } else {
-            const errorData = await parseResponse.json();
+            const errorData = await processResponse.json();
             alert(`Error parsing documents: ${errorData.error}`);
             console.error(errorData);
           }
