@@ -11,6 +11,8 @@ import pymysql
 import json
 import uuid  # For generating unique IDs
 import numpy as np
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
 
 # Load environment variables from .env file
 load_dotenv()
@@ -54,6 +56,14 @@ def connect_to_tidb():
         return None
 
 
+# Initialize the Claude LLM
+llm = ChatAnthropic(
+    model="claude-sonnet-4-20250514",
+    temperature=0.7,
+    anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+)
+
+
 @app.route("/")
 def home():
     return jsonify(
@@ -63,6 +73,7 @@ def home():
                 "upload_resume": "/upload_resume (POST)",
                 "process_documents": "/process_documents (POST)",
                 "vector_search": "/vector_search (POST)",
+                "generate_text": "/generate_text (POST)",
             },
         }
     )
@@ -269,6 +280,26 @@ def vector_search_endpoint():
     finally:
         if conn:
             conn.close()
+
+
+# Example of a simple chain using Claude (can be integrated into an endpoint later)
+@app.route("/generate_text", methods=["POST"])
+def generate_text_endpoint():
+    data = request.json
+    if not data or "prompt" not in data:
+        return jsonify({"error": "Missing prompt"}), 400
+
+    user_prompt = data["prompt"]
+
+    try:
+        prompt_template = ChatPromptTemplate.from_messages(
+            [("system", "You are a helpful AI assistant."), ("user", "{input}")]
+        )
+        chain = prompt_template | llm
+        response = chain.invoke({"input": user_prompt})
+        return jsonify({"generated_text": response.content})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
