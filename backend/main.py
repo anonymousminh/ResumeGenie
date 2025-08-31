@@ -46,7 +46,10 @@ def connect_to_tidb():
             user=DB_USER,
             password=DB_PASSWORD,
             database=DB_NAME,
-            autocommit=True,  # Ensure changes are committed
+            autocommit=True,
+            ssl={
+                "ssl": {"ssl_mode": "VERIFY_IDENTITY"}
+            },  # Ensure changes are committed
         )
         return conn
     except Exception as e:
