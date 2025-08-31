@@ -98,7 +98,7 @@ export default function Home() {
             const searchResultResponse = await fetch("http://localhost:5000/vector_search", {
               method: "POST",
               headers: {
-                "Content-Type": "applications/json",
+                "Content-Type": "application/json",
               },
               body: JSON.stringify({
                 queryEmbedding: jobPostingEmbed,
