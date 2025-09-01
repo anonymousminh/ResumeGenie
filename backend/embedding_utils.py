@@ -1,23 +1,19 @@
 import os
 from dotenv import load_dotenv
-from langchain_openai import OpenAIEmbeddings
-
-import os
-from dotenv import load_dotenv
-from langchain_openai import OpenAIEmbeddings
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Initialize OpenAI embedding model
-# This will use the text-embedding-ada-002 model by default
-# Ensure OPENAI_API_KEY is set in your environment variables or .env file
-embeddings_model = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize a free embedding model from Hugging Face
+# This model is free and doesn't require API keys
+embeddings_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
 def get_text_embedding(text: str) -> list[float]:
     """
-    Generates an embedding for the given text using OpenAI's embedding model.
+    Generates an embedding for the given text using a free embedding model.
 
     Args:
         text (str): The text to generate an embedding for
@@ -29,15 +25,17 @@ def get_text_embedding(text: str) -> list[float]:
         raise ValueError("Text cannot be empty")
 
     try:
-        embedding = embeddings_model.embed_query(text)
-        return embedding
+        # Generate embedding using the free model
+        embedding = embeddings_model.encode(text)
+        # Convert numpy array to list of floats
+        return embedding.tolist()
     except Exception as e:
         raise RuntimeError(f"Failed to generate embedding: {str(e)}")
 
 
 def get_multiple_text_embeddings(texts: list[str]) -> list[list[float]]:
     """
-    Generates embeddings for multiple texts using OpenAI's embedding model.
+    Generates embeddings for multiple texts using a free embedding model.
 
     Args:
         texts (list[str]): A list of texts to generate embeddings for
@@ -49,7 +47,9 @@ def get_multiple_text_embeddings(texts: list[str]) -> list[list[float]]:
         raise ValueError("Texts list cannot be empty")
 
     try:
-        embeddings = embeddings_model.embed_documents(texts)
-        return embeddings
+        # Generate embeddings for multiple texts
+        embeddings = embeddings_model.encode(texts)
+        # Convert numpy arrays to list of lists of floats
+        return [embedding.tolist() for embedding in embeddings]
     except Exception as e:
         raise RuntimeError(f"Failed to generate embeddings: {str(e)}")
