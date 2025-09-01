@@ -13,6 +13,7 @@ import uuid  # For generating unique IDs
 import numpy as np
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 # Load environment variables from .env file
 load_dotenv()
@@ -48,7 +49,10 @@ def connect_to_tidb():
             user=DB_USER,
             password=DB_PASSWORD,
             database=DB_NAME,
-            autocommit=True,  # Ensure changes are committed
+            autocommit=True,
+            ssl={
+                "ssl": {"ssl_mode": "VERIFY_IDENTITY"}
+            },  # Ensure changes are committed
         )
         return conn
     except Exception as e:
@@ -58,7 +62,7 @@ def connect_to_tidb():
 
 # Initialize the Claude LLM
 llm = ChatAnthropic(
-    model="claude-sonnet-4-20250514",
+    model="claude-3-haiku-20240307",
     temperature=0.7,
     anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
 )
@@ -298,6 +302,47 @@ def generate_text_endpoint():
         chain = prompt_template | llm
         response = chain.invoke({"input": user_prompt})
         return jsonify({"generated_text": response.content})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/rewrite_bullet", methods=["POST"])
+def rewrite_bullet_endpoint():
+    data = request.json
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    bullet_point = data.get("bulletPoint")
+    job_description = data.get("jobDescription")
+
+    if not bullet_point or not job_description:
+        return jsonify({"error": "Missing bullet point or job description"}), 400
+
+    try:
+        # Define the prompt template for bullet point rewriting
+        rewrite_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an expert resume writer. Your task is to rewrite a given resume bullet point to be more impactful, quantifiable, and tailored to a specific job description. Focus on achievements and results, using strong action verbs. Ensure the rewritten bullet point is concise and relevant to the job requirements.",
+                ),
+                (
+                    "user",
+                    "Original Resume Bullet Point: {bullet_point}\n\nJob Description:\n{job_description}\n\nRewrite the resume bullet point to be more impactful and relevant to the job description. Start directly with the rewritten bullet point, no introductory phrases.",
+                ),
+            ]
+        )
+
+        # Create the chain: Prompt -> LLM -> Output Parser
+        rewrite_chain = rewrite_prompt | llm | StrOutputParser()
+
+        # Invoke the chain with the provided inputs
+        rewritten_bullet = rewrite_chain.invoke(
+            {"bullet_point": bullet_point, "job_description": job_description}
+        )
+
+        return jsonify({"rewrittenBullet": rewritten_bullet})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
