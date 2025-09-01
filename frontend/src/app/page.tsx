@@ -1,42 +1,40 @@
 'use client';
 
-import { useState } from "react";
-import SuggestionCard from "@/components/features/SuggestionCard";
-import ResumePreview from "@/components/features/ResumePreview";
+import { useState, ChangeEvent, FormEvent } from 'react';
 
 export default function Home() {
-
   const [resumeFile, setResumeFile] = useState<File | null>(null);
-  const [jobPostingText, setJobPostingText] = useState<string>("");
-  const [resumeContent, setResumeContent] = useState<string>("");
-  const [jobPostingContent, setJobPostingContent] = useState<string>("");
-  
-  const handleResumeFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      const file = event.target.files[0];
-      setResumeFile(file);
-      const reader = new FileReader();
-      reader.onload = (e) => {  
-        if (e.target && typeof e.target.result === 'string') {
-          setResumeContent(e.target.result as string);
-        }
-      };
-      reader.readAsText(file);
+  const [jobPostingText, setJobPostingText] = useState<string>('');
+  const [parsedResumeContent, setParsedResumeContent] = useState<string>('');
+  const [parsedJobPostingContent, setParsedJobPostingContent] = useState<string>('');
+  const [rewrittenBullet, setRewrittenBullet] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleResumeFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setResumeFile(e.target.files[0]);
     }
   };
 
-  const handleJobPostingTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setJobPostingText(event.target.value);
-    setJobPostingContent(event.target.value);
-  }
+  const handleJobPostingTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    setJobPostingText(e.target.value);
+  };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setParsedResumeContent('');
+    setParsedJobPostingContent('');
+    setRewrittenBullet('');
+
     if (!resumeFile || !jobPostingText) {
-      alert("Please upload a resume and paste the job posting.");
+      setError("Please upload a resume and paste a job posting.");
+      setLoading(false);
       return;
     }
 
-    // Read resume file as ArrayBuffer, then convert to Base64
     const reader = new FileReader();
     reader.readAsArrayBuffer(resumeFile);
 
@@ -46,7 +44,8 @@ export default function Home() {
         const base64String = Buffer.from(arrayBuffer).toString("base64");
 
         try {
-          const uploadResponse = await fetch("http://localhost:5000/upload_resume", { // Point to your Flask backend S3 upload endpoint
+          // Step 1: Upload resume to S3 via backend endpoint
+          const uploadResponse = await fetch("http://localhost:5000/upload_resume", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -61,16 +60,14 @@ export default function Home() {
 
           if (!uploadResponse.ok) {
             const errorData = await uploadResponse.json();
-            alert(`Error uploading to S3: ${errorData.error}`);
-            console.error(errorData);
-            return;
+            throw new Error(`Error uploading to S3: ${errorData.error}`);
           }
 
           const uploadData = await uploadResponse.json();
           const s3Url = uploadData.s3Url;
           console.log("File uploaded to S3:", s3Url);
 
-          // Step 2: Call parsing endpoint with S3 URL and job posting text
+          // Step 2: Call processing endpoint (parsing, embedding, saving to TiDB)
           const processResponse = await fetch("http://localhost:5000/process_documents", {
             method: "POST",
             headers: {
@@ -78,118 +75,136 @@ export default function Home() {
             },
             body: JSON.stringify({
               s3Url: s3Url,
-              resumeFileType: resumeFile.type, // Pass file type for parsing
+              resumeFileType: resumeFile.type,
               jobPostingText: jobPostingText,
             }),
           });
 
-          if (processResponse.ok) {
-            const processedData = await processResponse.json();
-            alert(`Success: Data processed, embeddings generated, and saved to TiDB!`);
-            console.log("Parsed Resume:", processedData.parsedResumeText.substring(0, 500) + "...");
-            console.log("Parsed Job Posting:", processedData.parsedJobPostingText.substring(0, 500) + "...");
-            
-            console.log("Resume Embedding (first 5 dims):", processedData.resumeEmbedding.slice(0, 5), "...");
-            console.log("Job Posting Embedding (first 5 dims):",processedData.jobPostingEmbedding.slice(0, 5), "...");
-            setResumeContent(processedData.parsedResumeText);
-            setJobPostingContent(processedData.parsedJobPostingText);
-
-            const jobPostingEmbed = processedData.jobPostingEmbedding;
-            const searchResultResponse = await fetch("http://localhost:5000/vector_search", {
-              method: "POST",
-              headers: {
-                "Content-Type": "applications/json",
-              },
-              body: JSON.stringify({
-                queryEmbedding: jobPostingEmbed,
-                searchType: "resumes",
-                limit: 3
-              }),
-            });
-
-            if (searchResultResponse.ok) {
-              const searchResults = await searchResultResponse.json();
-              console.log("Top 3 Similar Resumes:", searchResults.results);
-            } else {
-              console.error("Error during vector search: ", await searchResultResponse.json());
-            }
-
-
-          } else {
+          if (!processResponse.ok) {
             const errorData = await processResponse.json();
-            alert(`Error parsing documents: ${errorData.error}`);
-            console.error(errorData);
+            throw new Error(`Error processing documents: ${errorData.error}`);
           }
-        } catch (error) {
-          console.error("Failed to send data to backend:", error);
-          alert("An error occurred while sending data to backend.");
+
+          const processedData = await processResponse.json();
+          setParsedResumeContent(processedData.parsedResumeText);
+          setParsedJobPostingContent(processedData.parsedJobPostingText);
+          console.log("Parsed Resume:", processedData.parsedResumeText.substring(0, 200) + "...");
+          console.log("Parsed Job Posting:", processedData.parsedJobPostingText.substring(0, 200) + "...");
+          console.log("Resume Embedding (first 5 dims):",
+
+
+ processedData.resumeEmbedding.slice(0, 5), "...");
+          console.log("Job Posting Embedding (first 5 dims):",
+
+
+ processedData.jobPostingEmbedding.slice(0, 5), "...");
+
+          // Example: Call the bullet rewriter for a sample bullet point
+          // In a real app, you'd iterate through resume bullet points
+          const sampleBullet = "Managed social media accounts."; // Replace with actual bullet from parsed resume
+          const rewriteResponse = await fetch("http://localhost:5000/rewrite_bullet", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              bulletPoint: sampleBullet,
+              jobDescription: jobPostingText,
+            }),
+          });
+
+          if (!rewriteResponse.ok) {
+            const errorData = await rewriteResponse.json();
+            throw new Error(`Error rewriting bullet: ${errorData.error}`);
+          }
+
+          const rewriteData = await rewriteResponse.json();
+          setRewrittenBullet(rewriteData.rewrittenBullet);
+          console.log("Rewritten Bullet:", rewriteData.rewrittenBullet);
+
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : 'An unknown error occurred');
+          console.error("Error during processing:", err);
+        } finally {
+          setLoading(false);
         }
       }
     };
   };
 
-
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          AI Career Coach / Resume Builder
-        </p>
+      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
+        <h1 className="text-4xl font-bold mb-8">AI Career Coach / Resume Builder</h1>
       </div>
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <h1 className="text-4xl font-bold">Upload Your Resume and Job Posting</h1>
-      </div>
+      <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-3xl gap-6">
+        <form onSubmit={handleSubmit} className="w-full flex flex-col gap-4">
+          <div className="flex flex-col">
+            <label htmlFor="resumeFile" className="mb-2 font-semibold">Upload Resume (PDF/DOCX):</label>
+            <input
+              type="file"
+              id="resumeFile"
+              accept=".pdf,.doc,.docx"
+              onChange={handleResumeFileChange}
+              className="p-2 border border-gray-300 rounded-md"
+            />
+          </div>
 
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-2 lg:text-left">
-        {/* Resume Upload Section */}
-        <div className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30">
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Resume Upload
-          </h2>
-          <input type="file" accept=".pdf,.doc,.docx" onChange={handleResumeFileChange} className="block w-full text-sm text-gray-500
-              file:mr-4 file:py-2 file:px-4
-              file:rounded-full file:border-0
-              file:text-sm file:font-semibold
-              file:bg-blue-50 file:text-blue-700
-              hover:file:bg-blue-100"/>
-          {resumeFile && <p className="mt-2 text-sm text-gray-600">Selected File: {resumeFile.name}</p>}
-          {resumeContent && (<div className="mt-4 p-2 border rounded-md bg-gray-50 max-h-40 overflow-y-auto text-sm">
-            <h3 className="font-semibold">Resume Content Review</h3>
-            <pre className="whitespace-pre-wrap">{resumeContent.substring(0, 500)}...</pre>
-          </div>)}
-        </div>
+          <div className="flex flex-col">
+            <label htmlFor="jobPostingText" className="mb-2 font-semibold">Paste Job Posting:</label>
+            <textarea
+              id="jobPostingText"
+              rows={10}
+              value={jobPostingText}
+              onChange={handleJobPostingTextChange}
+              placeholder="Paste the job description here..."
+              className="p-2 border border-gray-300 rounded-md resize-y"
+            ></textarea>
+          </div>
 
-        {/* Job Posting Input Section */}
-        <div className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30">
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Job Posting
-          </h2>
-          <textarea
-            className="w-full p-2 border rounded-md text-black bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            rows={10}
-            placeholder="Paste the job posting text here..."
-            value={jobPostingText}
-            onChange={handleJobPostingTextChange}
-          ></textarea>
-          {jobPostingContent && (
-            <div className="mt-4 p-2 border rounded-md bg-gray-50 max-h-40 overflow-y-auto text-sm">
-              <h3 className="font-semibold">Job Posting Content Preview:</h3>
-              <pre className="whitespace-pre-wrap">{jobPostingContent.substring(0, 500)}...</pre>
+          <button
+            type="submit"
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md"
+            disabled={loading}
+          >
+            {loading ? "Processing..." : "Analyze & Optimize Resume"}
+          </button>
+        </form>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative w-full" role="alert">
+            <strong className="font-bold">Error:</strong>
+            <span className="block sm:inline"> {error}</span>
+          </div>
+        )}
+
+        {parsedResumeContent && parsedJobPostingContent && (
+          <div className="w-full mt-8 p-6 border border-gray-200 rounded-md shadow-lg bg-white">
+            <h2 className="text-2xl font-bold mb-4">Analysis Results</h2>
+            <div className="mb-4">
+              <h3 className="text-xl font-semibold mb-2">Parsed Resume Content:</h3>
+              <p className="bg-gray-50 p-3 rounded-md text-gray-700 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                {parsedResumeContent}
+              </p>
             </div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-8 w-full flex justify-center">
-        <button onClick={handleSubmit} className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
-          Analyze Resume
-        </button>
-      </div>
-
-      <div className="mt-16 grid gap-8 lg:max-w-5xl lg:w-full lg:grid-cols-2">
-        <SuggestionCard />
-        <ResumePreview />
+            <div className="mb-4">
+              <h3 className="text-xl font-semibold mb-2">Parsed Job Posting Content:</h3>
+              <p className="bg-gray-50 p-3 rounded-md text-gray-700 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                {parsedJobPostingContent}
+              </p>
+            </div>
+            {rewrittenBullet && (
+              <div className="mb-4">
+                <h3 className="text-xl font-semibold mb-2">Rewritten Sample Bullet Point:</h3>
+                <p className="bg-green-50 p-3 rounded-md text-green-800 whitespace-pre-wrap">
+                  {rewrittenBullet}
+                </p>
+              </div>
+            )}
+            {/* Placeholder for similarity score, skill suggestions, etc. */}
+          </div>
+        )}
       </div>
     </main>
   );
