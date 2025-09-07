@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, ChangeEvent, FormEvent } from 'react';
+import ResumePreview from '../components/features/ResumePreview';
+import SuggestionCard from '../components/features/SuggestionCard';
 
 export default function Home() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
@@ -8,6 +10,8 @@ export default function Home() {
   const [parsedResumeContent, setParsedResumeContent] = useState<string>('');
   const [parsedJobPostingContent, setParsedJobPostingContent] = useState<string>('');
   const [rewrittenBullet, setRewrittenBullet] = useState<string>('');
+  const [selectedBullet, setSelectedBullet] = useState<string>('');
+  const [isRewriting, setIsRewriting] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +25,40 @@ export default function Home() {
     setJobPostingText(e.target.value);
   };
 
+  const handleBulletSelect = async (bulletPoint: string) => {
+    setSelectedBullet(bulletPoint);
+    setRewrittenBullet(''); // Clear previous result
+    setIsRewriting(true);
+    setError(null);
+
+    try {
+      const rewriteResponse = await fetch("http://localhost:5000/rewrite_bullet", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bulletPoint: bulletPoint,
+          jobDescription: jobPostingText,
+        }),
+      });
+
+      if (!rewriteResponse.ok) {
+        const errorData = await rewriteResponse.json();
+        throw new Error(`Error rewriting bullet: ${errorData.error}`);
+      }
+
+      const rewriteData = await rewriteResponse.json();
+      setRewrittenBullet(rewriteData.rewrittenBullet);
+      console.log("Rewritten Bullet:", rewriteData.rewrittenBullet);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred while rewriting the bullet point');
+      console.error("Error during bullet rewriting:", err);
+    } finally {
+      setIsRewriting(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -28,6 +66,8 @@ export default function Home() {
     setParsedResumeContent('');
     setParsedJobPostingContent('');
     setRewrittenBullet('');
+    setSelectedBullet('');
+    setIsRewriting(false);
 
     if (!resumeFile || !jobPostingText) {
       setError("Please upload a resume and paste a job posting.");
@@ -99,29 +139,6 @@ export default function Home() {
 
  processedData.jobPostingEmbedding.slice(0, 5), "...");
 
-          // Example: Call the bullet rewriter for a sample bullet point
-          // In a real app, you'd iterate through resume bullet points
-          const sampleBullet = "Managed social media accounts."; // Replace with actual bullet from parsed resume
-          const rewriteResponse = await fetch("http://localhost:5000/rewrite_bullet", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              bulletPoint: sampleBullet,
-              jobDescription: jobPostingText,
-            }),
-          });
-
-          if (!rewriteResponse.ok) {
-            const errorData = await rewriteResponse.json();
-            throw new Error(`Error rewriting bullet: ${errorData.error}`);
-          }
-
-          const rewriteData = await rewriteResponse.json();
-          setRewrittenBullet(rewriteData.rewrittenBullet);
-          console.log("Rewritten Bullet:", rewriteData.rewrittenBullet);
-
         } catch (err: unknown) {
           setError(err instanceof Error ? err.message : 'An unknown error occurred');
           console.error("Error during processing:", err);
@@ -180,29 +197,51 @@ export default function Home() {
         )}
 
         {parsedResumeContent && parsedJobPostingContent && (
-          <div className="w-full mt-8 p-6 border border-gray-200 rounded-md shadow-lg bg-white">
-            <h2 className="text-2xl font-bold mb-4">Analysis Results</h2>
-            <div className="mb-4">
-              <h3 className="text-xl font-semibold mb-2">Parsed Resume Content:</h3>
-              <p className="bg-gray-50 p-3 rounded-md text-gray-700 whitespace-pre-wrap max-h-60 overflow-y-auto">
-                {parsedResumeContent}
-              </p>
-            </div>
-            <div className="mb-4">
-              <h3 className="text-xl font-semibold mb-2">Parsed Job Posting Content:</h3>
-              <p className="bg-gray-50 p-3 rounded-md text-gray-700 whitespace-pre-wrap max-h-60 overflow-y-auto">
-                {parsedJobPostingContent}
-              </p>
-            </div>
-            {rewrittenBullet && (
-              <div className="mb-4">
-                <h3 className="text-xl font-semibold mb-2">Rewritten Sample Bullet Point:</h3>
-                <p className="bg-green-50 p-3 rounded-md text-green-800 whitespace-pre-wrap">
-                  {rewrittenBullet}
-                </p>
+          <div className="w-full mt-8">
+            <h2 className="text-2xl font-bold mb-6 text-center">Resume Optimization</h2>
+            
+            {/* Two-column layout for resume preview and suggestions */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left column: Resume Preview */}
+              <div className="space-y-6">
+                <ResumePreview 
+                  resumeContent={parsedResumeContent}
+                  jobPostingContent={parsedJobPostingContent}
+                  onBulletSelect={handleBulletSelect}
+                />
               </div>
-            )}
-            {/* Placeholder for similarity score, skill suggestions, etc. */}
+              
+              {/* Right column: Suggestions */}
+              <div className="space-y-6">
+                <SuggestionCard 
+                  selectedBullet={selectedBullet}
+                  jobPostingContent={parsedJobPostingContent}
+                  rewrittenBullet={rewrittenBullet}
+                  isLoading={isRewriting}
+                />
+              </div>
+            </div>
+            
+            {/* Optional: Show parsed content in collapsible sections for debugging */}
+            <details className="mt-8">
+              <summary className="cursor-pointer text-lg font-semibold text-gray-600 hover:text-gray-800">
+                View Parsed Content (Debug)
+              </summary>
+              <div className="mt-4 space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Parsed Resume Content:</h3>
+                  <p className="bg-gray-50 p-3 rounded-md text-gray-700 whitespace-pre-wrap max-h-60 overflow-y-auto text-sm">
+                    {parsedResumeContent}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Parsed Job Posting Content:</h3>
+                  <p className="bg-gray-50 p-3 rounded-md text-gray-700 whitespace-pre-wrap max-h-60 overflow-y-auto text-sm">
+                    {parsedJobPostingContent}
+                  </p>
+                </div>
+              </div>
+            </details>
           </div>
         )}
       </div>
