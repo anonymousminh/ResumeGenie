@@ -14,9 +14,45 @@ import numpy as np
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+def validate_environment_variables():
+    """Validate that all required environment variables are set."""
+    required_vars = [
+        "ANTHROPIC_API_KEY",
+        "AWS_S3_BUCKET_NAME",
+        "AWS_REGION",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "TIDB_HOST",
+        "TIDB_USER",
+        "TIDB_PASSWORD",
+    ]
+
+    missing_vars = []
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+
+    if missing_vars:
+        raise EnvironmentError(
+            f"Missing required environment variables: {', '.join(missing_vars)}"
+        )
+
+
+# Validate environment variables on startup
+try:
+    validate_environment_variables()
+except EnvironmentError as e:
+    print(f"Environment Error: {e}")
+    print(
+        "Please create a .env file with the required variables. See .env.example for reference."
+    )
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -58,6 +94,36 @@ def connect_to_tidb():
     except Exception as e:
         print(f"Error connecting to TiDB: {e}")
         return None
+
+
+def extract_skills_from_text(text_to_analyze: str):
+    """Helper function to extract skills from text without making HTTP requests."""
+    try:
+        parser = JsonOutputParser(pydantic_object=Skills)
+
+        skill_extraction_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an expert at identifying and extracting technical and soft skills from text. "
+                    "Extract a comprehensive list of distinct skills. You must respond with ONLY valid JSON. "
+                    "Do not include any explanatory text, comments, or formatting before or after the JSON. "
+                    "The response must start and end with valid JSON only.",
+                ),
+                (
+                    "user",
+                    "Extract skills from the following text:\n\n{text}\n\n{format_instructions}",
+                ),
+            ]
+        ).partial(format_instructions=parser.get_format_instructions())
+
+        skill_extraction_chain = skill_extraction_prompt | llm | parser
+
+        extracted_skills = skill_extraction_chain.invoke({"text": text_to_analyze})
+        return {"extractedSkills": extracted_skills["skills"]}
+
+    except Exception as e:
+        raise Exception(f"Failed to extract skills: {str(e)}")
 
 
 # Initialize the Claude LLM
@@ -161,6 +227,18 @@ def process_documents_endpoint():
         resume_embedding = get_text_embedding(parsed_resume_text)
         job_posting_embedding = get_text_embedding(job_posting_text)
 
+        # Extract skills from resume and job posting
+        # Fix: Call the function directly instead of making HTTP requests
+        resume_skills_data = extract_skills_from_text(parsed_resume_text)
+        job_posting_skills_data = extract_skills_from_text(job_posting_text)
+
+        resume_skills = set(resume_skills_data["extractedSkills"])
+        job_posting_skills = set(job_posting_skills_data["extractedSkills"])
+
+        # Identify skill gaps
+        skill_gaps = list(job_posting_skills - resume_skills)
+        matched_skills = list(job_posting_skills.intersection(resume_skills))
+
         # Save to TiDB
         conn = connect_to_tidb()
         if conn:
@@ -194,6 +272,10 @@ def process_documents_endpoint():
                 "parsedJobPostingText": job_posting_text,
                 "resumeEmbedding": resume_embedding,
                 "jobPostingEmbedding": job_posting_embedding,
+                "resumeSkills": list(resume_skills),
+                "jobPostingSkills": list(job_posting_skills),
+                "skillGaps": skill_gaps,
+                "matchedSkills": matched_skills,
             }
         )
     except ClientError as e:
@@ -342,6 +424,85 @@ def rewrite_bullet_endpoint():
         )
 
         return jsonify({"rewrittenBullet": rewritten_bullet})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# Define a Pydantic model for structured skill extraction
+class Skills(BaseModel):
+    skills: list[str] = Field(description="List of skills extracted from the text.")
+
+
+@app.route("/extract_skills", methods=["POST"])
+def extract_skills_endpoint():
+    data = request.json
+    if not data or "text" not in data:
+        return jsonify({"error": "Missing text"}), 400
+
+    text_to_analyze = data["text"]
+
+    try:
+        parser = JsonOutputParser(pydantic_object=Skills)
+
+        skill_extraction_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an expert at identifying and extracting technical and soft skills from text. "
+                    "Extract a comprehensive list of distinct skills. You must respond with ONLY valid JSON. "
+                    "Do not include any explanatory text, comments, or formatting before or after the JSON. "
+                    "The response must start and end with valid JSON only.",
+                ),
+                (
+                    "user",
+                    "Extract skills from the following text:\n\n{text}\n\n{format_instructions}",
+                ),
+            ]
+        ).partial(format_instructions=parser.get_format_instructions())
+
+        skill_extraction_chain = skill_extraction_prompt | llm | parser
+
+        extracted_skills = skill_extraction_chain.invoke({"text": text_to_analyze})
+        return jsonify({"extractedSkills": extracted_skills["skills"]})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/suggest_upskilling", methods=["POST"])
+def suggest_upskilling_endpoint():
+    data = request.json
+    if not data or "skillGaps" not in data or "jobDescription" not in data:
+        return jsonify({"error": "Missing skill gaps or job description"}), 400
+
+    skill_gaps = data["skillGaps"]
+    job_description = data["jobDescription"]
+
+    try:
+        upskilling_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an AI career coach. Based on identified skill gaps for a job, "
+                    "suggest a personalized upskilling path. Focus on what skills to learn and why they are important for the job. "
+                    "Provide actionable advice and potential learning areas, but DO NOT recommend specific courses or platforms. "
+                    "Keep the suggestions concise and encouraging.",
+                ),
+                (
+                    "user",
+                    "Identified Skill Gaps: {skill_gaps}\n\nJob Description:\n{job_description}\n\nSuggest an upskilling path to bridge these gaps for the given job. Focus on the 'what' and 'why', not specific course names.",
+                ),
+            ]
+        )
+
+        upskilling_chain = upskilling_prompt | llm | StrOutputParser()
+
+        upskilling_suggestion = upskilling_chain.invoke(
+            {"skill_gaps": ", ".join(skill_gaps), "job_description": job_description}
+        )
+
+        return jsonify({"upskillingSuggestion": upskilling_suggestion})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

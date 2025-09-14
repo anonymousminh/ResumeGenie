@@ -14,6 +14,9 @@ export default function Home() {
   const [isRewriting, setIsRewriting] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [skillGaps, setSkillGaps] = useState<string[]>([]);
+  const [matchedSkills, setMatchedSkills] = useState<string[]>([]);
+  const [upskillingSuggestion, setUpskillingSuggestion] = useState<string>("");
 
   const handleResumeFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -131,13 +134,42 @@ export default function Home() {
           console.log("Parsed Resume:", processedData.parsedResumeText.substring(0, 200) + "...");
           console.log("Parsed Job Posting:", processedData.parsedJobPostingText.substring(0, 200) + "...");
           console.log("Resume Embedding (first 5 dims):",
-
-
- processedData.resumeEmbedding.slice(0, 5), "...");
+          processedData.resumeEmbedding.slice(0, 5), "...");
           console.log("Job Posting Embedding (first 5 dims):",
+          processedData.jobPostingEmbedding.slice(0, 5), "...");
 
+          // Call extract_skills for resume and job posting
+          const resumeSkillsRes = await fetch("http://localhost:5000/extract_skills", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: processedData.parsedResumeText })
+          });
+          const jobSkillsRes = await fetch("http://localhost:5000/extract_skills", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: processedData.parsedJobPostingText })
+          });
 
- processedData.jobPostingEmbedding.slice(0, 5), "...");
+          if (resumeSkillsRes.ok && jobSkillsRes.ok) {
+            const rSkills = new Set((await resumeSkillsRes.json()).extractedSkills);
+            const jSkills = new Set((await jobSkillsRes.json()).extractedSkills);
+
+            const gaps = Array.from(jSkills).filter(skill => !rSkills.has(skill));
+            const matched = Array.from(jSkills).filter(skill => rSkills.has(skill));
+
+            setSkillGaps(gaps as string[]);
+            setMatchedSkills(matched as string[]);
+
+            // If there are skill gaps, get upskilling suggestion
+            if (gaps.length > 0) {
+              const upskillingRes = await fetch("http://localhost:5000/suggest_upskilling", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ skillGaps: gaps, jobDescription: jobPostingText })
+              });
+              if (upskillingRes.ok) {
+                const upskillingData = await upskillingRes.json();
+                setUpskillingSuggestion(upskillingData.upskillingSuggestion);
+              }
+            }
+          }
 
         } catch (err: unknown) {
           setError(err instanceof Error ? err.message : 'An unknown error occurred');
@@ -221,6 +253,33 @@ export default function Home() {
                 />
               </div>
             </div>
+
+            {matchedSkills.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-xl font-semibold mb-2">Matched Skills:</h3>
+                <p className="bg-blue-50 p-3 rounded-md text-blue-800 whitespace-pre-wrap">
+                  {matchedSkills.join(", ")}
+                </p>
+              </div>
+            )}
+
+            {skillGaps.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-xl font-semibold mb-2">Identified Skill Gaps:</h3>
+                <p className="bg-yellow-50 p-3 rounded-md text-yellow-800 whitespace-pre-wrap">
+                  {skillGaps.join(", ")}
+                </p>
+              </div>
+            )}
+
+            {upskillingSuggestion && (
+              <div className="mb-4">
+                <h3 className="text-xl font-semibold mb-2">Upskilling Path Suggestion:</h3>
+                <p className="bg-purple-50 p-3 rounded-md text-purple-800 whitespace-pre-wrap">
+                  {upskillingSuggestion}
+                </p>
+              </div>
+            )}
             
             {/* Optional: Show parsed content in collapsible sections for debugging */}
             <details className="mt-8">
