@@ -17,6 +17,7 @@ export default function Home() {
   const [skillGaps, setSkillGaps] = useState<string[]>([]);
   const [matchedSkills, setMatchedSkills] = useState<string[]>([]);
   const [upskillingSuggestion, setUpskillingSuggestion] = useState<string>("");
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState<boolean>(false);
 
   const handleResumeFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -181,6 +182,64 @@ export default function Home() {
     };
   };
 
+  const handleGeneratePDF = async () => {
+    if (!parsedResumeContent) {
+      setError("No resume content available for PDF generation");
+      return;
+    }
+
+    setIsGeneratingPDF(true);
+    setError(null);
+
+    try {
+      // Use the LangChain endpoint for better integration
+      const response = await fetch("http://localhost:5000/generate_pdf_langchain", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          resumeText: parsedResumeContent,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Error generating PDF: ${errorData.error}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || "PDF generation failed");
+      }
+      
+      // Create a blob from the base64 PDF data
+      const pdfBlob = new Blob([Uint8Array.from(atob(data.pdfBase64), c => c.charCodeAt(0))], {
+        type: 'application/pdf'
+      });
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'optimized_resume_langchain.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log("PDF generated successfully using LangChain workflow");
+      console.log("PDF size:", data.pdfSize, "bytes");
+      console.log("Workflow:", data.workflow);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred while generating PDF');
+      console.error("Error during PDF generation:", err);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
       <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
@@ -212,13 +271,26 @@ export default function Home() {
             ></textarea>
           </div>
 
-          <button
-            type="submit"
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md"
-            disabled={loading}
-          >
-            {loading ? "Processing..." : "Analyze & Optimize Resume"}
-          </button>
+          <div className="flex gap-4">
+            <button
+              type="submit"
+              className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md"
+              disabled={loading}
+            >
+              {loading ? "Processing..." : "Analyze & Optimize Resume"}
+            </button>
+            
+            {parsedResumeContent && (
+              <button
+                type="button"
+                onClick={handleGeneratePDF}
+                className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md"
+                disabled={isGeneratingPDF}
+              >
+                {isGeneratingPDF ? "Generating PDF..." : "Download PDF Resume"}
+              </button>
+            )}
+          </div>
         </form>
 
         {error && (
